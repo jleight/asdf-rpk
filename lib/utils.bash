@@ -2,8 +2,7 @@
 
 set -euo pipefail
 
-# TODO: Ensure this is the correct GitHub homepage where releases can be downloaded for rpk.
-GH_REPO="https://github.com/jleight/asdf-rpk"
+GH_REPO="https://github.com/redpanda-data/redpanda"
 TOOL_NAME="rpk"
 TOOL_TEST="rpk --version"
 
@@ -14,7 +13,6 @@ fail() {
 
 curl_opts=(-fsSL)
 
-# NOTE: You might want to remove this if rpk is not hosted on GitHub releases.
 if [ -n "${GITHUB_API_TOKEN:-}" ]; then
 	curl_opts=("${curl_opts[@]}" -H "Authorization: token $GITHUB_API_TOKEN")
 fi
@@ -26,23 +24,56 @@ sort_versions() {
 
 list_github_tags() {
 	git ls-remote --tags --refs "$GH_REPO" |
-		grep -o 'refs/tags/.*' | cut -d/ -f3- |
-		sed 's/^v//' # NOTE: You might want to adapt this sed to remove non-version strings from tags
+		grep -o 'refs/tags/v\d.*' |
+		cut -d/ -f3- |
+		sed 's/^v//'
 }
 
 list_all_versions() {
-	# TODO: Adapt this. By default we simply list the tag names from GitHub releases.
-	# Change this function if rpk has other means of determining installable versions.
 	list_github_tags
+}
+
+get_platform() {
+	local -r kernel="$(uname -s)"
+
+	if [[ ${OSTYPE} == "msys" || ${kernel} == "CYGWIN"* || ${kernel} == "MINGW"* ]]; then
+		echo windows
+	else
+		uname | tr '[:upper:]' '[:lower:]'
+	fi
+}
+
+get_arch() {
+	local -r machine="$(uname -m)"
+
+	OVERWRITE_ARCH=${ASDF_RPK_OVERWRITE_ARCH:-"false"}
+
+	if [[ ${OVERWRITE_ARCH} != "false" ]]; then
+		echo "${OVERWRITE_ARCH}"
+	elif [[ ${machine} == "arm64" ]] || [[ ${machine} == "aarch64" ]]; then
+		echo "arm64"
+	elif [[ ${machine} == *"arm"* ]] || [[ ${machine} == *"aarch"* ]]; then
+		echo "arm"
+	elif [[ ${machine} == *"386"* ]]; then
+		echo "386"
+	else
+		echo "amd64"
+	fi
+}
+
+get_download_url() {
+	local -r version="$1"
+	local -r platform="$(get_platform)"
+	local -r arch="$(get_arch)"
+
+	echo "${GH_REPO}/releases/download/v${version}/${TOOL_NAME}-${platform}-${arch}.zip"
 }
 
 download_release() {
 	local version filename url
 	version="$1"
 	filename="$2"
-
-	# TODO: Adapt the release URL convention for rpk
-	url="$GH_REPO/archive/v${version}.tar.gz"
+	url="$(get_download_url "${version}")"
 
 	echo "* Downloading $TOOL_NAME release $version..."
 	curl "${curl_opts[@]}" -o "$filename" -C - "$url" || fail "Could not download $url"
@@ -59,9 +90,11 @@ install_version() {
 
 	(
 		mkdir -p "$install_path"
-		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path"
 
-		# TODO: Assert rpk executable exists.
+		shopt -s dotglob
+		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path"
+		shopt -u dotglob
+
 		local tool_cmd
 		tool_cmd="$(echo "$TOOL_TEST" | cut -d' ' -f1)"
 		test -x "$install_path/$tool_cmd" || fail "Expected $install_path/$tool_cmd to be executable."
