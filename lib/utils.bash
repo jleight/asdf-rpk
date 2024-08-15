@@ -90,7 +90,10 @@ install_version() {
 
 	(
 		mkdir -p "$install_path"
-		cp -rT "$ASDF_DOWNLOAD_PATH" "$install_path"
+
+		shopt -s dotglob
+		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path"
+		shopt -u dotglob
 
 		local tool_cmd
 		tool_cmd="$(echo "$TOOL_TEST" | cut -d' ' -f1)"
